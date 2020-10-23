@@ -1,6 +1,7 @@
 {
     "require": {
-        "algolia/algoliasearch-client-php": "^1.27"
+        "algolia/algoliasearch-client-php": "^2.0",
+	  	"guzzlehttp/guzzle": "^6.0"
     },
     "config": {
         "vendor-dir": "libs/vendor"

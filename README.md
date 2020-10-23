@@ -1,5 +1,7 @@
-# ojs-algolia
+# Algolia Plugin
 Plugin integrating OJS and Algolia
+
+This version is compatible with OJS 3.2.1+ and v2.0 of the PHP Algolia Search API and will not work with previous versions.
 
 ## Server requirements
 - PHP Packages:
