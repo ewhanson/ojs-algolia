@@ -13,7 +13,7 @@
  *
  * @brief Indexes content into Algolia
  *
- * This class relies on Composer, the PHP curl and mbstring extensions. Please 
+ * This class relies on Composer, the PHP curl and mbstring extensions. Please
  * install Composer and activate the extension before trying to index content into Algolia
  */
 
@@ -37,7 +37,7 @@ class AlgoliaService {
 
     /**
      * [__construct description]
-     * 
+     *
      * @param boolean $settingsArray [description]
      */
     function __construct($settingsArray = false) {
@@ -58,6 +58,7 @@ class AlgoliaService {
      */
     function _getJournal($journalId) {
         if (isset($this->_journalCache[$journalId])) {
+        	// TODO: _journalCache does not exist. Check if problem.
             $journal = $this->_journalCache[$journalId];
         } else {
             $journalDao = DAORegistry::getDAO('JournalDAO'); /* @var $journalDao JournalDAO */
@@ -80,6 +81,7 @@ class AlgoliaService {
         } else {
             $issueDao = DAORegistry::getDAO('IssueDAO'); /* @var $issueDao IssueDAO */
             $issue = $issueDao->getById($issueId, $journalId, true);
+            // TODO: _issueCache does not exist. Check if problem.
             $this->_issueCache[$issueId] = $issue;
         }
 
@@ -93,18 +95,20 @@ class AlgoliaService {
     /**
      * Mark a single article "changed" so that the indexing
      * back-end will update it during the next batch update.
-     * @param $articleId Integer
+	 *
+     * @param $publication Publication
      */
-    function markArticleChanged($articleId, $journalId = null) {
-        if(!is_numeric($articleId)) {
-            assert(false);
-            return;
-        }
+    function markArticleChanged($publication, $journalId = null) {
+    	// FIXME: markArticleChanged does nothing with $journalId
+		if (!is_a($publication, 'Publication')) {
+			assert(false);
+			return;
+		}
 
-        $articleDao = DAORegistry::getDAO('ArticleDAO'); /* @var $articleDao ArticleDAO */
-        $articleDao->updateSetting(
-            $articleId, 'algoliaIndexingState', ALGOLIA_INDEXINGSTATE_DIRTY, 'bool'
-        );
+		Services::get('publication')->edit(
+			$publication,
+			['algoliaIndexingState' => ALGOLIA_INDEXINGSTATE_DIRTY],
+			Application::get()->getRequest());
     }
 
     /**
@@ -118,21 +122,24 @@ class AlgoliaService {
             return;
         }
 
-        // Retrieve all articles of the journal.
-        $articleDao = DAORegistry::getDAO('ArticleDAO'); /* @var $articleDao ArticleDAO */
-        $articles = $articleDao->getByContextId($journalId);
+        $articlesChanged = 0;
 
-        $publishedArticleDao = DAORegistry::getDAO('PublishedArticleDAO'); /* @var $publishedArticleDao PublishedArticleDAO */
+        // Retrieve all articles of the journal.
+		$submissionDao = DAORegistry::getDAO('SubmissionDAO'); /* @var $submissionDao SubmissionDAO */
+		$submissions = $submissionDao->getByContextId($journalId);
 
         // Run through the articles and mark them "changed".
-        while($article = $articles->next()) {
-            $publishedArticle = $publishedArticleDao->getByArticleId($article->getId());
-            if (is_a($publishedArticle, 'PublishedArticle')) {
-                if($article->getStatusKey() == "submission.status.published"){
-                    $this->markArticleChanged($publishedArticle->getId(), $journalId);
-                }
-            }
-        }
+		while ($submission = $submissions->next()) {
+			$publication = $submission->getCurrentPublication();
+			if (is_a($publication, 'Publication')) {
+				if ($publication->getData('status') == STATUS_PUBLISHED) {
+					$this->markArticleChanged($publication, $journalId);
+					$articlesChanged++;
+				}
+			}
+		}
+
+		return $articlesChanged;
     }
 
     /**
@@ -151,30 +158,25 @@ class AlgoliaService {
      */
     function pushChangedArticles($batchSize = ALGOLIA_INDEXING_MAX_BATCHSIZE, $journalId = null) {
         // Retrieve a batch of "changed" articles.
-        import('lib.pkp.classes.db.DBResultRange');
-        $range = new DBResultRange($batchSize);
-        $articleDao = DAORegistry::getDAO('ArticleDAO'); /* @var $articleDao ArticleDAO */
-        $changedArticlesIterator = $articleDao->getBySetting(
-            'algoliaIndexingState', ALGOLIA_INDEXINGSTATE_DIRTY, $journalId, $range
-        );
-        unset($range);
-
-        // Retrieve articles and overall count from the result set.
-        $changedArticles = $changedArticlesIterator->toArray();
-        $batchCount = count($changedArticles);
-        $totalCount = $changedArticlesIterator->getCount();
-        unset($changedArticlesIterator);
+        $queryParams = array(
+        	'algoliaIndexingState' => ALGOLIA_INDEXINGSTATE_DIRTY,
+			'contextIds' => is_null($journalId) ? [] : [$journalId],
+			'count' => $batchSize
+		);
+        $changedArticleIterator = Services::get('publication')->getMany($queryParams);
 
         $toDelete = array();
         $toAdd = array();
 
-        foreach($changedArticles as $indexedArticle) {
-            $indexedArticle->setData('algoliaIndexingState', ALGOLIA_INDEXINGSTATE_CLEAN);
-            $articleDao->updateLocaleFields($indexedArticle);
-            
-            $toDelete[] = $this->buildAlgoliaObjectDelete($indexedArticle);
-            $toAdd[] = $this->buildAlgoliaObjectAdd($indexedArticle);
-        }
+        foreach ($changedArticleIterator as $indexedArticle) {
+			$indexedArticle = Services::get('publication')->edit(
+				$indexedArticle,
+				['algoliaIndexingState' => ALGOLIA_INDEXINGSTATE_CLEAN],
+				Application::get()->getRequest());
+
+			$toDelete[] = $this->buildAlgoliaObjectDelete($indexedArticle);
+			$toAdd[] = $this->buildAlgoliaObjectAdd($indexedArticle);
+		}
 
         if($journalId){
             unset($toDelete);
@@ -191,23 +193,35 @@ class AlgoliaService {
     }
 
     /**
-     * Deletes the given article from Algolia.
+     * Deletes the given article (submission) from Algolia.
+	 * NB: Loops through all published publications associated with a submission.
      *
-     * @param $articleId integer The ID of the article to be deleted.
+     * @param $submissionId integer The ID of the article (submission) to be deleted.
      *
      * @return boolean true if successful, otherwise false.
      */
-    function deleteArticleFromIndex($articleId) {
-        if(!is_numeric($articleId)) {
+    function deleteArticleFromIndex($submissionId) {
+        if(!is_numeric($submissionId)) {
             assert(false);
             return;
         }
 
         $toDelete = array();
-        $toDelete[] = $this->buildAlgoliaObjectDelete($articleId);
+
+        $submissionDao = DAORegistry::getDAO('SubmissionDAO'); /* @var SubmissionDAO */
+		$submission = $submissionDao->getById($submissionId);
+		$publicationIds = $submission->getPublishedPublications();
+
+		// TODO: Check to see if this is desired behaviour
+		foreach ($publicationIds as $publicationId) {
+			$toDelete[] = $this->buildAlgoliaObjectDelete($publicationId);
+		}
+
         foreach($toDelete as $delete){
             $this->indexer->deleteByDistinctId($delete['distinctId']);
         }
+
+        return true;
     }
 
     /**
@@ -219,6 +233,7 @@ class AlgoliaService {
      * @return boolean true if successful, otherwise false.
      */
     function deleteArticlesFromIndex($journalId = null) {
+    	// TODO: Check for 3.2+ update
         // Delete only articles from one journal if a
         // journal ID is given.
         $journalQuery = '';
@@ -254,10 +269,11 @@ class AlgoliaService {
      * @return array
      */
     function _getFieldNames() {
+    	// TODO: Investigate if this is where indexing keywords should happen
         return array(
             'localized' => array(
                 'title', 'abstract', 'discipline', 'subject',
-                'type', 'coverage',
+                'type', 'coverage', // TODO: See if 'discipline' and 'subject' should be plural
             ),
             'multiformat' => array(
                 'galleyFullText'
@@ -278,6 +294,7 @@ class AlgoliaService {
      * @return boolean True if authorized, otherwise false.
      */
     function _isArticleAccessAuthorized($article) {
+    	// TODO: Unclear what this does. Should it use Submission or Publication??
         // Did we get a published article?
         if (!is_a($article, 'PublishedArticle')) return false;
 
@@ -305,21 +322,21 @@ class AlgoliaService {
         return true;
     }
 
-    function buildAlgoliaObjectAdd($article){
+    function buildAlgoliaObjectAdd($publication){
         // mark the article as "clean"
-        $articleDao = DAORegistry::getDAO('ArticleDAO'); /* @var $articleDao ArticleDAO */
-        $articleDao->updateSetting(
-            $article->getId(), 'algoliaIndexingState', ALGOLIA_INDEXINGSTATE_CLEAN, 'bool'
-        );
+		$publication = Services::get('publication')->edit(
+			$publication,
+			['algoliaIndexingState' => ALGOLIA_INDEXINGSTATE_CLEAN],
+			Application::get()->getRequest());
 
         $baseData = array(
             "objectAction" => "addObject",
-            "distinctId" => $article->getId(),
+            "distinctId" => $publication->getId(),
         );
 
         $objects = array();
 
-        $articleData = $this->mapAlgoliaFieldsToIndex($article);
+        $articleData = $this->mapAlgoliaFieldsToIndex($publication);
         foreach($articleData['body'] as $i => $chunks){
             if(trim($chunks)){
                 $baseData['objectID'] = $baseData['distinctId'] . "_" . $i;
@@ -333,17 +350,17 @@ class AlgoliaService {
         return $objects;
     }
 
-    function buildAlgoliaObjectDelete($articleOrArticleId){
-        if(!is_numeric($articleOrArticleId)) {
+    function buildAlgoliaObjectDelete($publicationOrPublicationId){
+        if(!is_numeric($publicationOrPublicationId)) {
             return array(
                 "objectAction" => "deleteObject",
-                "distinctId" => $articleOrArticleId->getId(),
+                "distinctId" => $publicationOrPublicationId->getId(),
             );
         }
 
         return array(
             "objectAction" => "deleteObject",
-            "distinctId" => $articleOrArticleId,
+            "distinctId" => $publicationOrPublicationId,
         );
     }
 
@@ -366,52 +383,53 @@ class AlgoliaService {
         return $fieldsToIndex;
     }
 
-    function mapAlgoliaFieldsToIndex($article){
+    function mapAlgoliaFieldsToIndex($publication){
+    	// TODO: For adding subject terms later
         $mappedFields = array();
 
         $fieldsToIndex = $this->getAlgoliaFieldsToIndex();
         foreach($fieldsToIndex as $field){
             switch($field){
                 case "title":
-                    $mappedFields[$field] = $this->formatTitle($article);
+                    $mappedFields[$field] = $this->formatTitle($publication);
                     break;
 
                 case "abstract":
-                    $mappedFields[$field] = $this->formatAbstract($article);
+                    $mappedFields[$field] = $this->formatAbstract($publication);
                     break;
 
                 case "discipline":
-                    $mappedFields[$field] = (array) $article->getDiscipline(null);
+                    $mappedFields[$field] = (array) $publication->getLocalizedData('disciplines', $publication->getData('locale'));
                     break;
 
                 case "subject":
-                    $mappedFields[$field] = (array) $article->getSubject(null);
+                    $mappedFields[$field] = (array) $publication->getLocalizedData('subjects', $publication->getData('locale'));
                     break;
 
                 case "type":
-                    $mappedFields[$field] = $article->getType(null);
+                    $mappedFields[$field] = $publication->getLocalizedData('type', $publication->getData('locale'));
                     break;
 
                 case "coverage":
-                    $mappedFields[$field] = (array) $article->getCoverage(null);
+                    $mappedFields[$field] = (array) $publication->getLocalizedData('coverage', $publication->getData('locale'));
                     break;
 
                 case "galleyFullText":
-                    $mappedFields[$field] = $this->getGalleyHTML($article);
+                    $mappedFields[$field] = $this->getGalleyHTML($publication);
                     break;
 
                 case "authors":
-                    $mappedFields[$field] = $this->getAuthors($article);
+                    $mappedFields[$field] = $this->getAuthors($publication);
                     break;
 
                 case "publicationDate":
-                    $mappedFields[$field] = strtotime($article->getDatePublished());
+                    $mappedFields[$field] = strtotime($publication->getData('datePublished'));
                     break;
             }
         }
 
-        $mappedFields['section'] = $article->getSectionTitle();
-        $mappedFields['url'] = $this->formatUrl($article);
+        $mappedFields['section'] = $this->getSectionTitle($publication);
+        $mappedFields['url'] = $this->formatUrl($publication);
 
         // combine abstract and galleyFullText into body and unset them
         $mappedFields['body'] = array_merge($mappedFields['abstract'], $mappedFields['galleyFullText']);
@@ -422,6 +440,8 @@ class AlgoliaService {
     }
 
     function formatPublicationDate($article, $custom = false){
+    	// TODO: This function is never called
+		// TODO: Consider removing `custom`; never used.
         if(!$custom){
             return $article->getDatePublished();
         }else{
@@ -431,40 +451,27 @@ class AlgoliaService {
         }
     }
 
-    function formatUrl($article, $custom = false){
-        $baseUrl = Config::getVar('general', 'base_url');
-
-        if(!preg_match("#/index\.php#", $baseUrl)){
-            $baseUrl .= "/index.php";
-        }
-
-        $publishedArticleDao = DAORegistry::getDAO('PublishedArticleDAO');
-        $publishedArticle = $publishedArticleDao->getByArticleId($article->getId());
-        $sequence = $publishedArticle->getSequence();
-
-        $issueDao = DAORegistry::getDAO('IssueDAO');
-        $issue = $issueDao->getById($publishedArticle->getIssueId());
-        $volume = $issue->getData("volume");
-        $number = $issue->getData("number");
-
-        $journalDao = DAORegistry::getDAO('JournalDAO');
-        $journal = $journalDao->getById($article->getJournalId());
-        $acronym = $journal->getLocalizedAcronym();
-
-        if(!$custom){
-            return $baseUrl . "/" . strtolower($acronym) . "/article/view/" . $article->getId();
-        }else{
-            // as an example...format your custom url how you'd like
-            return $baseUrl . "/" . strtolower($acronym) . "/article/view/" . $acronym . $volume . "." . $number . "." . str_pad($number, 2, "0", STR_PAD_LEFT);
-        }
+    function formatUrl($publication){
+    	$publicationProperties = Services::get('publication')->getProperties(
+    		$publication,
+			['urlPublished'],
+			['request' => Application::get()->getRequest()]);
+    	return $publicationProperties['urlPublished'];
     }
 
-    function getAuthors($article){
+    function getAuthors($publication){
         $authorText = array();
-        $authors = $article->getAuthors();
-        $authorCount = count($authors);
-        for ($i = 0, $count = $authorCount; $i < $count; $i++) {
-            //
+		$publicationProperties = Services::get('publication')->getProperties(
+			$publication,
+			['authors'],
+			['request' => Application::get()->getRequest()]);
+		$authorsData = $publicationProperties['authors'];
+
+		$authorDao = DAORegistry::getDAO('AuthorDAO'); /* @var AuthorDAO */
+        foreach ($authorsData as $authorData) {
+        	$author = $authorDao->getById($authorData['id']);
+            // TODO: From 3.1.x version. Remove if not used.
+        	//
             // do we need all this? aff and bio?
             //
             // $affiliations = $author->getAffiliation(null);
@@ -475,37 +482,41 @@ class AlgoliaService {
             // if (is_array($bios)) foreach ($bios as $bio) { // Localized
             //     array_push($authorText, strip_tags($bio));
             // }
-
-            $authorName = "";
-
-            $author = $authors[$i];
-
-            $authorName .= $author->getFirstName();
-
-            if($author->getMiddleName()){
-                $authorName .= " " . $author->getMiddleName();
-            }
-
-            $authorName .= " " . $author->getLastName();
-
-            $authorText[] = $authorName;
+			$authorText[] = $author->getFullName();
         }
 
         return implode(", ", $authorText);
     }
 
-    function formatAbstract($article){
-        return $this->chunkContent($article->getAbstract($article->getLocale()));
+	/**
+	 * Gets section title string from a publication
+	 *
+	 * @param $publication Publication
+	 * @return string
+	 */
+    function getSectionTitle($publication) {
+    	$sectionId = $publication->getData('sectionId');
+    	$sectionDao = DAORegistry::getDAO('SectionDAO'); /* @var SectionDAO */
+		$section = $sectionDao->getById($sectionId);
+		return $section->getLocalizedTitle();
+	}
+
+    function formatAbstract($publication){
+        return $this->chunkContent($publication->getLocalizedData('abstract', $publication->getData('locale')));
     }
 
-    function getGalleyHTML($article){
-        $publishedArticleDao = DAORegistry::getDAO('PublishedArticleDAO');
-        $publishedArticle = $publishedArticleDao->getByArticleId($article->getId());
-
+    function getGalleyHTML($publication){
         $contents = "";
 
-        $galleys = $publishedArticle->getGalleys();
-        foreach($galleys as $galley){
+        $publicationProperties = Services::get('publication')->getProperties(
+        	$publication,
+			['galleys'],
+			['request' => Application::get()->getRequest()]);
+		$galleysData = $publicationProperties['galleys'];
+
+		$articleGalleyDao = DAORegistry::getDAO('ArticleGalleyDAO'); /* @var ArticleGalleyDAO */
+        foreach($galleysData as $galleyData){
+        	$galley = $articleGalleyDao->getById($galleyData['id']);
             if($galley->getFileType() == "text/html"){
                 $submissionFile = $galley->getFile();
                 $contents .= file_get_contents($submissionFile->getFilePath());
@@ -536,8 +547,8 @@ class AlgoliaService {
         return $data;
     }
 
-    function formatTitle($article){
-        $title = $article->getTitle(null);
+    function formatTitle($publication){
+        $title = $publication->getLocalizedTitle();
 
         return preg_replace("/<.*?>/", "", $title);
     }

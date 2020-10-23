@@ -44,7 +44,12 @@ class AlgoliaPlugin extends GenericPlugin {
         if ($success && $this->getEnabled($mainContextId)) {
             $this->_registerTemplateResource();
 
-            // Register callbacks (controller-level).
+			// Register hooks for plugin specific publication settings
+			HookRegistry::register('Schema::get::publication', array($this, 'addToPublicationSchema'));
+			HookRegistry::register('Publication::getMany::queryBuilder', array($this, 'modifyPublicationQueryBuilder'));
+			HookRegistry::register('Publication::getMany::queryObject', array($this, 'modifyPublicationQueryObject'));
+
+			// Register callbacks (controller-level).
             HookRegistry::register('ArticleSearchIndex::articleMetadataChanged', array($this, 'callbackArticleMetadataChanged'));
             HookRegistry::register('ArticleSearchIndex::articleDeleted', array($this, 'callbackArticleDeleted'));
             HookRegistry::register('ArticleSearchIndex::articleChangesFinished', array($this, 'callbackArticleChangesFinished'));
@@ -173,24 +178,98 @@ class AlgoliaPlugin extends GenericPlugin {
         return parent::manage($args, $request);
     }
 
+	/**
+	 * Add properties used for tracking publication indexing state to the entity's
+	 * list for storage in the database.
+	 *
+	 * @param $hookName string `Schema::get::publication`
+	 * @param $params array
+	 *
+	 * @return bool
+	 */
+	public function addToPublicationSchema($hookName, $params) {
+		$schema =& $params[0];
+
+		$schema->properties->{'algoliaIndexingState'} = (object) [
+			'type' => 'boolean',
+			'validation' => ['nullable'],
+		];
+
+		return false;
+	}
+
+	/**
+	 * Run app-specific query builder methods for getMany
+	 *
+	 * @param $hookName string
+	 * @param $params array [
+	 *		@option \APP\Services\QueryBuilders\PublicationQueryBuilder
+	 *		@option array Request args
+	 * ]
+	 *
+	 * @return bool
+	 */
+	public function modifyPublicationQueryBuilder($hookName, $params) {
+		// This is for modifying the query builder, i.e. to add a filter
+		$publicationQB =& $params[0];
+		$requestArgs = $params[1];
+
+		if (!empty($requestArgs['algoliaIndexingState'])) {
+			$algoliaIndexingState = $requestArgs['algoliaIndexingState'];
+			$publicationQB->algoliaIndexingState = $algoliaIndexingState;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Add app-specific query statements to the publication getMany query
+	 *
+	 * @param $hookName string
+	 * @param $params array [
+	 *		@option object $queryObject
+	 *		@option \APP\Services\QueryBuilders\PublicationQueryBuilder $queryBuilder
+	 * ]
+	 *
+	 * @return bool
+	 */
+	public function modifyPublicationQueryObject($hookName, $params) {
+		// Include desired query into the query objects, i.e. to include added filter
+		$queryObject =& $params[0];
+		$queryBuilder = $params[1];
+
+		if (!empty($queryBuilder->algoliaIndexingState)) {
+			$algoliaIndexingState = $queryBuilder->algoliaIndexingState;
+
+			$queryObject->leftJoin('publication_settings as ps', 'p.publication_id', '=', 'ps.publication_id')
+				->where('ps.setting_name', '=', 'algoliaIndexingState')
+				->where('ps.setting_value', '=', $algoliaIndexingState);
+		}
+
+		return false;
+	}
+
     //
     // Data-access level hook implementations.
     //
-    /**
-     * @see ArticleSearchIndex::articleMetadataChanged()
-     *
-     * Published articles where the metadata is changed will fire this hook.
-     * We need to immediately call pushChangedArticles because the change are 
-     * already live.
-     */
+	/**
+	 * Published articles where the metadata is changed will fire this hook.
+	 * We need to immediately call pushChangedArticles because the change are
+	 * already live.
+	 * @see ArticleSearchIndex::articleMetadataChanged()
+	 *
+	 * @param $hookName 'ArticleSearchIndex::articleMetadataChanged'
+	 * @param $params array '[Submission]'
+	 *
+	 * @return bool
+	 */
     function callbackArticleMetadataChanged($hookName, $params) {
         assert($hookName == 'ArticleSearchIndex::articleMetadataChanged');
-        list($article) = $params; /* @var $article Article */
+        $submission = $params[0]; /* @var $submission Submission */
 
-        $publishedArticleDao = DAORegistry::getDAO('PublishedArticleDAO'); /* @var $publishedArticleDao PublishedArticleDAO */
-        $publishedArticle = $publishedArticleDao->getByArticleId($article->getId());
-        if (is_a($publishedArticle, 'PublishedArticle')) {
-            $this->_algoliaService->markArticleChanged($article->getId());
+		$publication = $submission->getCurrentPublication();
+		if (is_a($publication, 'Publication')) {
+			$this->_algoliaService->markArticleChanged($publication);
             $this->_algoliaService->pushChangedArticles(5);
         }
 
@@ -202,11 +281,14 @@ class AlgoliaPlugin extends GenericPlugin {
      */
     function callbackArticleDeleted($hookName, $params) {
         assert($hookName == 'ArticleSearchIndex::articleDeleted');
-        list($articleId) = $params;
+        $submissionId = $params[0];
+
+
+
         // Deleting an article must always be done synchronously
         // (even in pull-mode) as we'll no longer have an object
         // to keep our change information.
-        $this->_algoliaService->deleteArticleFromIndex($articleId);
+        $this->_algoliaService->deleteArticleFromIndex($submissionId);
         return true;
     }
 
@@ -227,7 +309,7 @@ class AlgoliaPlugin extends GenericPlugin {
         // locked in case a race condition with a large index update
         // occurs.
         $algoliaService = $this->getAlgoliaService();
-        $result = $algoliaService->pushChangedArticles(5);
+        $algoliaService->pushChangedArticles(5);
 
         return true;
     }
@@ -261,8 +343,9 @@ class AlgoliaPlugin extends GenericPlugin {
      */
     function callbackSubmissionFileDeleted($hookName, $params) {
         assert($hookName == 'ArticleSearchIndex::submissionFileDeleted');
-        list($articleId, $type, $assocId) = $params;
-        $this->_algoliaService->deleteArticleFromIndex($articleId);
+        $submissionId = $params[0];
+
+        $this->_algoliaService->deleteArticleFromIndex($submissionId);
         return true;
     }
 
@@ -313,7 +396,8 @@ class AlgoliaPlugin extends GenericPlugin {
                 $numMarked = $this->_algoliaService->markJournalChanged($journal->getId());
                 $algoliaService->pushChangedArticles(ALGOLIA_INDEXING_MAX_BATCHSIZE, $journal->getId());
 
-                $this->_indexingMessage($log, ' ' . __('search.cli.rebuildIndex.result', array('numIndexed' => $numIndexed)) . PHP_EOL, $messages);
+                // TODO: Note: $numMarked listed as $numIndex in 3.1.x version. Did not exist.
+                $this->_indexingMessage($log, ' ' . __('search.cli.rebuildIndex.result', array('numIndexed' => $numMarked)) . PHP_EOL, $messages);
             }
         }
 
@@ -331,13 +415,6 @@ class AlgoliaPlugin extends GenericPlugin {
     function _indexingMessage($log, $message, &$messages) {
         if ($log) echo $message;
         $messages .= $message;
-    }
-
-    /**
-     * @copydoc PKPPlugin::getTemplatePath
-     */
-    function getTemplatePath($inCore = false) {
-        return $this->getTemplateResourceName() . ':templates/';
     }
 }
 
