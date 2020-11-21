@@ -14,8 +14,8 @@
 
 require_once dirname(dirname(__FILE__)) . '/libs/vendor/autoload.php';
 
-use AlgoliaSearch\Client;
-use AlgoliaSearch\AlgoliaException;
+use Algolia\AlgoliaSearch\SearchClient;
+use Algolia\AlgoliaSearch\Exceptions\AlgoliaException;
 
 class AlgoliaEngine {
 
@@ -35,14 +35,14 @@ class AlgoliaEngine {
         $this->index = $settings['index'];
 
         try {
-            $this->client = new Client($this->settings['app_id'], $this->settings['api_key']);
+        	$this->client = SearchClient::create($this->settings['app_id'], $this->settings['api_key']);
         } catch (Exception $e) {
             return false;
         }
     }
 
     /**
-     * @return Client|null
+     * @return SearchClient|null
      */
     public function get_client()
     {
@@ -57,7 +57,7 @@ class AlgoliaEngine {
     public function get_indexes()
     {
         try {
-            $indexes = $this->client->listIndexes();
+            $indexes = $this->client->listIndices();
 
             $data = array();
             foreach ($indexes['items'] as $index) {
@@ -79,10 +79,13 @@ class AlgoliaEngine {
      */
     public function index($objects)
     {
-        $index = $this->client->initIndex($this->index);
+        // Adds API v2 required field 'indexName' to objects
+		foreach ($objects as &$object) {
+			$object['indexName'] = $this->index;
+		}
 
         try {
-            $success = $index->batchObjects($objects);
+			$success = $this->client->multipleBatch($objects);
         } catch (AlgoliaException $e) {
             return $e->getMessage();
         }
@@ -99,10 +102,13 @@ class AlgoliaEngine {
      */
     public function delete($objects)
     {
-        $index = $this->client->initIndex($this->index);
+		// Adds API v2 required field 'indexName' to objects
+		foreach ($objects as &$object) {
+			$object['indexName'] = $this->index;
+		}
 
         try {
-            $index->batchObjects($objects);
+			$this->client->multipleBatch($objects);
         } catch (AlgoliaException $e) {
             return $e->getMessage();
         }
@@ -118,10 +124,11 @@ class AlgoliaEngine {
      */
     public function clear_index()
     {
+    	// TODO: Checked
         $index = $this->client->initIndex($this->index);
 
         try {
-            $index->clearIndex();
+            $index->clearObjects();
         } catch (AlgoliaException $e) {
             return $e->getMessage();
         }
@@ -134,9 +141,14 @@ class AlgoliaEngine {
      */
     public function deleteByDistinctId($distinctId)
     {
+    	// TODO: Checked
         $index = $this->client->initIndex($this->index);
 
         try {
+        	// TODO: See if should use faceted filters or regular filters
+//            $index->deleteBy([
+//                'facetFilters' => ['distinctId:' . $distinctId],
+//            ]);
             $index->deleteBy([
                 'filters' => 'distinctId:' . $distinctId,
             ]);

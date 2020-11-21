@@ -54,6 +54,8 @@ class AlgoliaPlugin extends GenericPlugin {
             HookRegistry::register('ArticleSearchIndex::articleDeleted', array($this, 'callbackArticleDeleted'));
             HookRegistry::register('ArticleSearchIndex::articleChangesFinished', array($this, 'callbackArticleChangesFinished'));
             HookRegistry::register('ArticleSearchIndex::submissionFileDeleted', array($this, 'callbackSubmissionFileDeleted'));
+            HookRegistry::register('Publication::publish', array($this, 'callbackPublicationStatusChanged'));
+            HookRegistry::register('Publication::unpublish', array($this, 'callbackPublicationStatusChanged'));
 
             HookRegistry::register('ArticleSearchIndex::rebuildIndex', array($this, 'callbackRebuildIndex'));
 
@@ -246,7 +248,7 @@ class AlgoliaPlugin extends GenericPlugin {
 				->where('ps.setting_value', '=', $algoliaIndexingState);
 		}
 
-		return false;
+		return true;
 	}
 
     //
@@ -291,6 +293,26 @@ class AlgoliaPlugin extends GenericPlugin {
         $this->_algoliaService->deleteArticleFromIndex($submissionId);
         return true;
     }
+
+	/**
+	 * Marks all publications associated with submission as dirty so they can be
+	 * handled by AlgoliaService::pushChangedArticles()
+	 *
+	 * @param $hookName String
+	 * @param $params array [
+	 * 		@option $newPublication Publication
+	 * 		@option $oldPublication Publication
+	 * 		@option $submission Submission
+	 * ]
+	 */
+    function callbackPublicationStatusChanged($hookName, $params) {
+		$submission = $params[2];
+
+		$publicationsIterator = Services::get('publication')->getMany(['submissionIds' => $submission->getId()]);
+		foreach ($publicationsIterator as $publication) {
+			$this->_algoliaService->markArticleChanged($publication);
+		}
+	}
 
     /**
      * @see ArticleSearchIndex::articleChangesFinished()
@@ -361,6 +383,7 @@ class AlgoliaPlugin extends GenericPlugin {
      * @return boolean True on success, otherwise false.
      */
     function _rebuildIndex($log, $journal, $buildIndex, &$messages) {
+    	// TODO: Clean up
         // Rebuilding the index can take a long time.
         @set_time_limit(0);
         $algoliaService = $this->getAlgoliaService();

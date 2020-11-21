@@ -130,6 +130,7 @@ class AlgoliaService {
 
         // Run through the articles and mark them "changed".
 		while ($submission = $submissions->next()) {
+			// TODO: Only marks current publication, not all publications as changed
 			$publication = $submission->getCurrentPublication();
 			if (is_a($publication, 'Publication')) {
 				if ($publication->getData('status') == STATUS_PUBLISHED) {
@@ -175,7 +176,12 @@ class AlgoliaService {
 				Application::get()->getRequest());
 
 			$toDelete[] = $this->buildAlgoliaObjectDelete($indexedArticle);
-			$toAdd[] = $this->buildAlgoliaObjectAdd($indexedArticle);
+
+			// Only add/re-add if indexedArticle still has STATUS_PUBLISHED
+			// Check if publication is current, don't add if not
+			if ($indexedArticle->getData('status') == STATUS_PUBLISHED && $this->_isCurrentPublication($indexedArticle)) {
+				$toAdd[] = $this->buildAlgoliaObjectAdd($indexedArticle);
+			}
 		}
 
         if($journalId){
@@ -183,7 +189,7 @@ class AlgoliaService {
             $this->indexer->clear_index();
         }else{
             foreach($toDelete as $delete){
-                $this->indexer->deleteByDistinctId($delete['distinctId']);
+                $this->indexer->deleteByDistinctId($delete['body']['distinctId']);
             }
         }
 
@@ -217,8 +223,8 @@ class AlgoliaService {
 			$toDelete[] = $this->buildAlgoliaObjectDelete($publicationId);
 		}
 
-        foreach($toDelete as $delete){
-            $this->indexer->deleteByDistinctId($delete['distinctId']);
+        foreach ($toDelete as $delete) {
+            $this->indexer->deleteByDistinctId($delete['body']['distinctId']);
         }
 
         return true;
@@ -234,6 +240,7 @@ class AlgoliaService {
      */
     function deleteArticlesFromIndex($journalId = null) {
     	// TODO: Check for 3.2+ update
+		// TODO: Never called
         // Delete only articles from one journal if a
         // journal ID is given.
         $journalQuery = '';
@@ -273,7 +280,7 @@ class AlgoliaService {
         return array(
             'localized' => array(
                 'title', 'abstract', 'discipline', 'subject',
-                'type', 'coverage', // TODO: See if 'discipline' and 'subject' should be plural
+                'keyword', 'type', 'coverage',
             ),
             'multiformat' => array(
                 'galleyFullText'
@@ -295,6 +302,7 @@ class AlgoliaService {
      */
     function _isArticleAccessAuthorized($article) {
     	// TODO: Unclear what this does. Should it use Submission or Publication??
+		// TODO: Never called
         // Did we get a published article?
         if (!is_a($article, 'PublishedArticle')) return false;
 
@@ -330,8 +338,10 @@ class AlgoliaService {
 			Application::get()->getRequest());
 
         $baseData = array(
-            "objectAction" => "addObject",
-            "distinctId" => $publication->getId(),
+            "action" => "addObject",
+            "body" => array(
+				"distinctId" => (String) $publication->getId(),
+			)
         );
 
         $objects = array();
@@ -339,11 +349,12 @@ class AlgoliaService {
         $articleData = $this->mapAlgoliaFieldsToIndex($publication);
         foreach($articleData['body'] as $i => $chunks){
             if(trim($chunks)){
-                $baseData['objectID'] = $baseData['distinctId'] . "_" . $i;
+                $baseData['body']['objectID'] = $baseData['body']['distinctId'] . "_" . $i;
                 $chunkedData = $articleData;
                 $chunkedData['body'] = $chunks;
                 $chunkedData['order'] = $i + 1;
-                $objects[] = array_merge($baseData, $chunkedData);
+                $baseData['body'] = array_merge($baseData['body'], $chunkedData);
+                $objects[] = $baseData;
             }
         }
 
@@ -351,16 +362,23 @@ class AlgoliaService {
     }
 
     function buildAlgoliaObjectDelete($publicationOrPublicationId){
+    	// Wraps distinctId in `body` to keep consistent with expected Algolia list of operations
+		// which expects only an `action`, `indexName`, and `body`.
+		// See https://www.algolia.com/doc/api-reference/api-methods/batch/#method-param-operations
         if(!is_numeric($publicationOrPublicationId)) {
             return array(
-                "objectAction" => "deleteObject",
-                "distinctId" => $publicationOrPublicationId->getId(),
+                "action" => "deleteObject",
+                "body" => array(
+					"distinctId" => $publicationOrPublicationId->getId()
+				)
             );
         }
 
         return array(
-            "objectAction" => "deleteObject",
-            "distinctId" => $publicationOrPublicationId,
+            "action" => "deleteObject",
+            "body" => array (
+				"distinctId" => $publicationOrPublicationId
+			)
         );
     }
 
@@ -384,7 +402,6 @@ class AlgoliaService {
     }
 
     function mapAlgoliaFieldsToIndex($publication){
-    	// TODO: For adding subject terms later
         $mappedFields = array();
 
         $fieldsToIndex = $this->getAlgoliaFieldsToIndex();
@@ -405,6 +422,10 @@ class AlgoliaService {
                 case "subject":
                     $mappedFields[$field] = (array) $publication->getLocalizedData('subjects', $publication->getData('locale'));
                     break;
+
+				case "keyword":
+					$mappedFields[$field] = (array) $publication->getLocalizedData('keywords', $publication->getData('locale'));
+					break;
 
                 case "type":
                     $mappedFields[$field] = $publication->getLocalizedData('type', $publication->getData('locale'));
@@ -552,4 +573,16 @@ class AlgoliaService {
 
         return preg_replace("/<.*?>/", "", $title);
     }
+
+	/**
+	 * Checks if publication is submission's current publication
+	 *
+	 * @param $publication Publication
+	 * @return bool
+	 */
+	private function _isCurrentPublication($publication) {
+    	$submission = Services::get('submission')->get($publication->getData('submissionId'));
+
+    	return $publication->getId() == $submission->getCurrentPublication()->getId();
+	}
 }
