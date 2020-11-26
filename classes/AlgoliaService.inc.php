@@ -473,11 +473,14 @@ class AlgoliaService {
     }
 
     function formatUrl($publication){
-    	$publicationProperties = Services::get('publication')->getProperties(
-    		$publication,
+    	$submission = Services::get('submission')->get($publication->getData('submissionId'));
+    	$submissionProperties = Services::get('submission')->getProperties(
+    		$submission,
 			['urlPublished'],
-			['request' => Application::get()->getRequest()]);
-    	return $publicationProperties['urlPublished'];
+			['request' => Application::get()->getRequest()]
+		);
+    	return $submissionProperties['urlPublished'];
+
     }
 
     function getAuthors($publication){
