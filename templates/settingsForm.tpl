@@ -29,6 +29,7 @@
         <div class="separator"></div>
         <br>
 
+		{* TODO: Update language used re: application ID *}
         {fbvElement type="text" id="appId" value=$appId label="plugins.generic.algolia.settings.appId" required=true}
         <span class="instruct">{translate key="plugins.generic.algolia.settings.appIdInstructions"}</span>
         <div class="separator"></div>

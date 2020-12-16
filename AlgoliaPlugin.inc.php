@@ -407,6 +407,7 @@ class AlgoliaPlugin extends GenericPlugin {
             } else {
                 $journalDao = DAORegistry::getDAO('JournalDAO'); /* @var $journalDao JournalDAO */
                 $journalIterator = $journalDao->getAll();
+				// TODO: Is it necessary to convert iterator to array? Don't think so. Check.
                 $journals = $journalIterator->toArray();
             }
 
