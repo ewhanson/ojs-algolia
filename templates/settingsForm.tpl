@@ -29,7 +29,6 @@
         <div class="separator"></div>
         <br>
 
-		{* TODO: Update language used re: application ID *}
         {fbvElement type="text" id="appId" value=$appId label="plugins.generic.algolia.settings.appId" required=true}
         <span class="instruct">{translate key="plugins.generic.algolia.settings.appIdInstructions"}</span>
         <div class="separator"></div>
@@ -66,8 +65,8 @@
 
     <table class="data">
         <tr>
-            <td class="label">{fieldLabel name="rebuildIndex" key="plugins.generic.algolia.settings.indexRebuild"}</td>
             <td class="value">
+				<h3 class="label">{fieldLabel name="rebuildIndex" key="plugins.generic.algolia.settings.indexRebuild"}</h3>
                 <select name="journalToReindex" id="journalToReindex" class="selectMenu">
                     {html_options options=$journalsToReindex selected=$journalToReindex}
                 </select>
@@ -82,8 +81,8 @@
                 <br/>
                 {if $rebuildIndexMessages}
                     <div id="rebuildIndexMessage">
-                        <strong>{translate key="plugins.generic.algolia.settings.indexRebuildMessages"}</strong><br/>
-                        {$rebuildIndexMessages|escape|replace:$smarty.const.PHP_EOL:"<br/>"|replace:" ":"&nbsp;"}
+						<strong>{translate key="plugins.generic.algolia.settings.indexRebuildMessages"}</strong><br/>
+						<pre>{$rebuildIndexMessages|escape|replace:$smarty.const.PHP_EOL:"<br/>"|replace:" ":"&nbsp;"}</pre>
                     </div>
                 {else}
                     <span class="instruct">{translate key="plugins.generic.algolia.settings.indexRebuildDescription"}</span><br/>

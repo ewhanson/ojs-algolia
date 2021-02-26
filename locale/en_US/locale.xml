@@ -30,8 +30,8 @@
     <message key="plugins.generic.algolia.settings.searchOnlyKeyInstructions">Search only key for the indexing engine</message>
     <message key="plugins.generic.algolia.settings.searchOnlyKeyRequired">Please enter a valid search only key</message>
 
-    <message key="plugins.generic.algolia.settings.appId">App ID</message>
-    <message key="plugins.generic.algolia.settings.appIdInstructions">The app id of your Algolia account</message>
+    <message key="plugins.generic.algolia.settings.appId">Application ID</message>
+    <message key="plugins.generic.algolia.settings.appIdInstructions">The application id of your Algolia account</message>
     <message key="plugins.generic.algolia.settings.appIdRequired">Please enter a valid app id</message>
 
     <message key="plugins.generic.algolia.settings.index">Index</message>
@@ -44,4 +44,5 @@
     <message key="plugins.generic.algolia.settings.indexRebuildDescription">Used to reindex all content from either one or all journals.</message>
     <message key="plugins.generic.algolia.settings.indexRebuildJournal">Rebuild index for journal "{$journalName}"</message>
     <message key="plugins.generic.algolia.settings.indexAdministration">Index Administration</message>
+		<message key="plugins.generic.algolia.settings.indexRebuildMessages">Indexing results</message>
 </locale>

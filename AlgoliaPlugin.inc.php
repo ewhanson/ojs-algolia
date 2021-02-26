@@ -165,6 +165,8 @@ class AlgoliaPlugin extends GenericPlugin {
 
 									// Transfer indexing output to the form template.
 									$form->setData('rebuildIndexMessages', $messages);
+
+									return new JSONMessage(true, $form->fetch($request));
 								}
 							}
 						}
