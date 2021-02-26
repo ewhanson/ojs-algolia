@@ -388,16 +388,11 @@ class AlgoliaPlugin extends GenericPlugin {
 	 * @return boolean True on success, otherwise false.
 	 */
 	function _rebuildIndex($log, $journal, $buildIndex, &$messages) {
-		// TODO: Clean up
 		// Rebuilding the index can take a long time.
 		@set_time_limit(0);
 		$algoliaService = $this->getAlgoliaService();
 
 		if ($buildIndex) {
-			// If we got a journal instance then only re-index
-			// articles from that journal.
-			$journalIdOrNull = (is_a($journal, 'Journal') ? $journal->getId() : null);
-
 			// Clear index (if the journal id is null then
 			// all journals will be deleted from the index).
 			$this->_indexingMessage($log, 'AlgoliaPlugin: ' . __('search.cli.rebuildIndex.clearingIndex') . ' ... ', $messages);
@@ -413,7 +408,6 @@ class AlgoliaPlugin extends GenericPlugin {
 				/* @var $journalDao JournalDAO */
 				$journalDao = DAORegistry::getDAO('JournalDAO');
 				$journalIterator = $journalDao->getAll();
-				// TODO: Is it necessary to convert iterator to array? Don't think so. Check.
 				$journals = $journalIterator->toArray();
 			}
 
@@ -426,7 +420,6 @@ class AlgoliaPlugin extends GenericPlugin {
 				$numMarked = $this->_algoliaService->markJournalChanged($journal->getId());
 				$algoliaService->pushChangedArticles(ALGOLIA_INDEXING_MAX_BATCHSIZE, $journal->getId());
 
-				// TODO: Note: $numMarked listed as $numIndex in 3.1.x version. Did not exist.
 				$this->_indexingMessage($log, ' ' . __('search.cli.rebuildIndex.result', array('numIndexed' => $numMarked)) . PHP_EOL, $messages);
 			}
 		}

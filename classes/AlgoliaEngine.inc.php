@@ -118,7 +118,6 @@ class AlgoliaEngine {
 	 * @return string
 	 */
 	public function clear_index() {
-		// TODO: Checked
 		$index = $this->client->initIndex($this->index);
 
 		try {
@@ -135,7 +134,6 @@ class AlgoliaEngine {
 	 * @return bool
 	 */
 	public function deleteByDistinctId($distinctId) {
-		// TODO: Checked
 		$index = $this->client->initIndex($this->index);
 
 		try {

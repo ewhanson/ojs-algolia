@@ -59,7 +59,6 @@ class AlgoliaService {
 	 */
 	function _getJournal($journalId) {
 		if (isset($this->_journalCache[$journalId])) {
-			// TODO: _journalCache does not exist. Check if problem.
 			$journal = $this->_journalCache[$journalId];
 		} else {
 			/* @var $journalDao JournalDAO */
@@ -102,8 +101,7 @@ class AlgoliaService {
 	 *
 	 * @param $publication Publication
 	 */
-	function markArticleChanged($publication, $journalId = null) {
-		// FIXME: markArticleChanged does nothing with $journalId
+	function markArticleChanged($publication) {
 		if (!is_a($publication, 'Publication')) {
 			assert(false);
 			return;
@@ -136,7 +134,6 @@ class AlgoliaService {
 
 		// Run through the articles and mark them "changed".
 		while ($submission = $submissions->next()) {
-			// TODO: Only marks current publication, not all publications as changed
 			$publication = $submission->getCurrentPublication();
 			if (is_a($publication, 'Publication')) {
 				if ($publication->getData('status') == STATUS_PUBLISHED) {
@@ -225,7 +222,6 @@ class AlgoliaService {
 		$submission = $submissionDao->getById($submissionId);
 		$publicationIds = $submission->getPublishedPublications();
 
-		// TODO: Check to see if this is desired behaviour
 		foreach ($publicationIds as $publicationId) {
 			$toDelete[] = $this->buildAlgoliaObjectDelete($publicationId);
 		}
@@ -244,10 +240,9 @@ class AlgoliaService {
 	 * @param $journalId integer If given, only articles
 	 *  from this journal will be deleted.
 	 * @return boolean true if successful, otherwise false.
+	 * @deprecated Never called. Will be removed.
 	 */
 	function deleteArticlesFromIndex($journalId = null) {
-		// TODO: Check for 3.2+ update
-		// TODO: Never called
 		// Delete only articles from one journal if a
 		// journal ID is given.
 		$journalQuery = '';
@@ -302,12 +297,14 @@ class AlgoliaService {
 	}
 
 	/**
+	 * HAS NOT BEEN UPDATED FOR 3.2.
 	 * Check whether access to the given article
 	 * is authorized to the requesting party (i.e. the
 	 * Solr server).
 	 *
 	 * @param $article Article
 	 * @return boolean True if authorized, otherwise false.
+	 * @deprecated Never called. Will be removed.
 	 */
 	function _isArticleAccessAuthorized($article) {
 		// TODO: Unclear what this does. Should it use Submission or Publication??
@@ -469,9 +466,13 @@ class AlgoliaService {
 		return $mappedFields;
 	}
 
+	/**
+	 * @param $article
+	 * @param false $custom
+	 * @return false|string
+	 * @deprecated Never called. Will be removed.
+	 */
 	function formatPublicationDate($article, $custom = false) {
-		// TODO: This function is never called
-		// TODO: Consider removing `custom`; never used.
 		if (!$custom) {
 			return $article->getDatePublished();
 		} else {
@@ -504,18 +505,6 @@ class AlgoliaService {
 		/* @var AuthorDAO */
 		foreach ($authorsData as $authorData) {
 			$author = $authorDao->getById($authorData['id']);
-			// TODO: From 3.1.x version. Remove if not used.
-			//
-			// do we need all this? aff and bio?
-			//
-			// $affiliations = $author->getAffiliation(null);
-			// if (is_array($affiliations)) foreach ($affiliations as $affiliation) { // Localized
-			//     array_push($authorText, $affiliation);
-			// }
-			// $bios = $author->getBiography(null);
-			// if (is_array($bios)) foreach ($bios as $bio) { // Localized
-			//     array_push($authorText, strip_tags($bio));
-			// }
 			$authorText[] = $author->getFullName();
 		}
 
